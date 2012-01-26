@@ -1,9 +1,9 @@
-SPEC_XML_FILES =					\
-	mate-session.xml				\
-	org.mate.SessionManager.ref.xml		\
-	org.mate.SessionManager.Client.ref.xml		\
-	org.mate.SessionManager.ClientPrivate.ref.xml	\
-	org.mate.SessionManager.Inhibitor.ref.xml	\
+SPEC_XML_FILES =			\
+	mate-session.xml		\
+	org.mate.SessionManager.ref.xml \
+	org.mate.SessionManager.Client.ref.xml \
+	org.mate.SessionManager.ClientPrivate.ref.xml \
+	org.mate.SessionManager.Inhibitor.ref.xml \
 	org.mate.SessionManager.Presence.ref.xml
 
 if DOCBOOK_DOCS_ENABLED

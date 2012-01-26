@@ -1,0 +1,67 @@
+mate-session-manager (1.1.2-3) oneiric; urgency=low
+
+  * Fix typo
+
+ -- Matt Rinsch <gfunkmonk@gmail.com>  Wed, 18 Jan 2012 13:27:21 -0500
+
+mate-session-manager (1.1.2-2) oneiric; urgency=low
+
+  * Fix a couple overlooked bugs
+
+ -- Matt Rinsch <gfunkmonk@gmail.com>  Wed, 18 Jan 2012 08:33:24 -0500
+
+mate-session-manager (1.1.2-1) oneiric; urgency=low
+
+  * New upstream release
+  * Patches from 2.30 & 2.32
+
+ -- Matt Rinsch <gfunkmonk@gmail.com>  Wed, 18 Jan 2012 08:13:05 -0500
+
+mate-session-manager (1.1.0-1) oneiric; urgency=low
+
+  * init
+
+ -- Matt Rinsch <gfunkmonk@gmail.com>  Mon, 09 Jan 2012 16:32:38 -0500
+
+mate-session-manager (1.1.0-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Stefano Karapetsas <stefano@karapetsas.com>  Sun, 11 Dec 2011 00:43:32 +0100
+
+mate-session-manager (1.0.0-3) unstable; urgency=low
+
+  * Fixed architecture, must be any instead of all.
+
+ -- Stefano Karapetsas <stefano@karapetsas.com>  Fri, 11 Nov 2011 11:37:08 +0100
+
+mate-session-manager (1.0.0-2) unstable; urgency=low
+
+  * Fixed debian/ folder.
+
+ -- Stefano Karapetsas <stefano@karapetsas.com>  Sun, 06 Nov 2011 00:40:13 +0100
+
+mate-session-manager (1.0.0-1) unstable; urgency=low
+
+  * New upstream release
+
+ -- Clement Lefebvre <root@linuxmint.com>  Sat, 05 Nov 2011 12:44:49 +0000
+
+mate-session-manager (2011.10.27-3) unstable; urgency=low
+
+  * Added mateconf-merge-schema in debian/rules.
+
+ -- Stefano Karapetsas <stefano@karapetsas.com>  Fri, 28 Oct 2011 22:04:47 +0200
+
+mate-session-manager (2011.10.27-2) unstable; urgency=low
+
+  * Added scripts.
+
+ -- Stefano Karapetsas <stefano@karapetsas.com>  Thu, 27 Oct 2011 06:53:39 +0200
+
+mate-session-manager (2011.10.27-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Stefano Karapetsas <stefano@karapetsas.com>  Thu, 27 Oct 2011 01:45:33 +0200
+

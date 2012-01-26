@@ -8,7 +8,7 @@ ui_DATA = \
 	gsm-inhibit-dialog.ui
 
 xsessiondir = $(datadir)/xsessions
-xsession_in_files = mate.desktop.in
+xsession_in_files = mate.desktop.in mate-failsafe.desktop.in
 xsession_DATA = $(xsession_in_files:.desktop.in=.desktop)
 
 desktopdir = $(datadir)/applications
@@ -20,6 +20,12 @@ desktop_in_files += mate-wm.desktop.in
 endif
 
 @INTLTOOL_DESKTOP_RULE@
+
+pixmap_DATA_dist = mate-splash.png
+if ENABLE_SPLASH
+pixmapdir = $(datadir)/pixmaps/splash/
+pixmap_DATA = $(pixmap_DATA_dist)
+endif
 
 schemas_in_in_files = mate-session.schemas.in.in
 schemas_in_files = $(schemas_in_in_files:.schemas.in.in=.schemas.in)

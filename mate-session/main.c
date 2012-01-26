@@ -394,6 +394,16 @@ static gboolean require_dbus_session(int argc, char** argv, GError** error)
 	{
 		new_argv[i + 2] = argv[i];
 	}
+        new_argv[i + 2] = NULL;
+        
+        if (!execvp ("dbus-launch", new_argv)) {
+                g_set_error (error, 
+                             G_SPAWN_ERROR,
+                             G_SPAWN_ERROR_FAILED,
+                             "No session bus and could not exec dbus-launch: %s",
+                             g_strerror (errno));
+                return FALSE;
+        }
 
 	new_argv[i + 2] = NULL;
 

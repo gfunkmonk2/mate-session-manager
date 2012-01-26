@@ -21,6 +21,7 @@
 #include <config.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <string.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <sys/time.h>
@@ -36,6 +37,9 @@
 
 #include "gsm-util.h"
 
+#define GTK_RESPONSE_CHANGE_SESSION -20
+
+static const gchar *_saved_session_dirname = "saved-session";
 static gchar *_saved_session_dir = NULL;
 
 char *
@@ -175,6 +179,12 @@ gsm_util_get_empty_tmp_session_dir (void)
         return tmp;
 }
 
+void
+gsm_util_set_saved_session_dirname (const char * dirname)
+{
+        _saved_session_dirname = dirname;
+}
+
 const gchar *
 gsm_util_get_saved_session_dir (void)
 {
@@ -184,7 +194,7 @@ gsm_util_get_saved_session_dir (void)
                 _saved_session_dir =
                         g_build_filename (g_get_user_config_dir (),
                                           "mate-session",
-                                          "saved-session",
+                                          _saved_session_dirname,
                                           NULL);
 
                 exists = ensure_dir_exists (_saved_session_dir);

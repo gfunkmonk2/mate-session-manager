@@ -94,6 +94,9 @@ struct _GsmClientClass
                                                               GError   **error);
         gboolean              (*impl_stop)                   (GsmClient *client,
                                                               GError   **error);
+        gboolean              (*impl_request_save)           (GsmClient *client,
+                                                              guint      flags,
+                                                              GError   **error);
         GKeyFile *            (*impl_save)                   (GsmClient *client,
                                                               GError   **error);
 };
@@ -139,6 +142,9 @@ gboolean              gsm_client_cancel_end_session         (GsmClient  *client,
 
 void                  gsm_client_disconnected               (GsmClient  *client);
 
+gboolean              gsm_client_request_save               (GsmClient  *client,
+                                                             guint       flags,
+                                                             GError    **error);
 GKeyFile             *gsm_client_save                       (GsmClient  *client,
                                                              GError    **error);
 /* exported to bus */

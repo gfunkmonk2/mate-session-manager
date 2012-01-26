@@ -36,6 +36,7 @@
 #include "gsm-marshal.h"
 
 #include "gsm-manager.h"
+#include "gsm-util.h"
 
 #define GSM_DBUS_CLIENT_GET_PRIVATE(o) (G_TYPE_INSTANCE_GET_PRIVATE ((o), GSM_TYPE_DBUS_CLIENT, GsmDBusClientPrivate))
 
@@ -413,6 +414,19 @@ gsm_dbus_client_finalize (GObject *object)
         G_OBJECT_CLASS (gsm_dbus_client_parent_class)->finalize (object);
 }
 
+static gboolean
+dbus_client_request_save (GsmClient *client,
+                          guint      flags,
+                          GError   **error)
+{
+        g_debug ("GsmDBusClient: sending save request to client with id %s",
+                 gsm_client_peek_id (client));
+
+        /* FIXME: The protocol does not support this */
+
+        return FALSE;
+}
+
 static GKeyFile *
 dbus_client_save (GsmClient *client,
                   GError   **error)
@@ -665,6 +679,7 @@ gsm_dbus_client_class_init (GsmDBusClientClass *klass)
         object_class->set_property         = gsm_dbus_client_set_property;
         object_class->dispose              = gsm_dbus_client_dispose;
 
+        client_class->impl_request_save           = dbus_client_request_save;
         client_class->impl_save                   = dbus_client_save;
         client_class->impl_stop                   = dbus_client_stop;
         client_class->impl_query_end_session      = dbus_client_query_end_session;

@@ -68,6 +68,7 @@
 #define GSM_MANAGER_DBUS_NAME "org.mate.SessionManager"
 
 #define GSM_MANAGER_PHASE_TIMEOUT 10 /* seconds */
+#define GSM_MANAGER_SAVE_SESSION_TIMEOUT 2
 
 #define MDM_FLEXISERVER_COMMAND "mdmflexiserver"
 #define MDM_FLEXISERVER_ARGS    "--startnew Standard"
@@ -87,6 +88,9 @@
 #define KEY_AUTOSAVE              KEY_MATE_SESSION_DIR "/auto_save_session"
 
 #define KEY_SLEEP_LOCK            "/apps/mate-screensaver/lock_enabled"
+#define KEY_SLEEP_LOCK_USE_SCREENSAVER "/apps/mate-power-manager/lock/use_screensaver_settings"
+#define GPM_CONF_LOCK_ON_SUSPEND   "/apps/mate-power-manager/lock/suspend"
+#define GPM_CONF_LOCK_ON_HIBERNATE "/apps/mate-power-manager/lock/hibernate"
 
 #define IS_STRING_EMPTY(x) ((x)==NULL||(x)[0]=='\0')
 
@@ -328,13 +332,16 @@ app_condition_changed (GsmApp     *app,
                 } else {
                         g_debug ("GsmManager: stopping app %s", gsm_app_peek_id (app));
 
-                        /* If we don't have a client then we should try to kill the app */
+                        /* If we don't have a client then we should try to kill the app,
+                         * if it is running */
                         error = NULL;
-                        res = gsm_app_stop (app, &error);
-                        if (error != NULL) {
-                                g_warning ("Not able to stop app from its condition: %s",
-                                           error->message);
-                                g_error_free (error);
+                        if (gsm_app_is_running (app)) {
+                                res = gsm_app_stop (app, &error);
+                                if (error != NULL) {
+                                       g_warning ("Not able to stop app from its condition: %s",
+                                                error->message);
+                                   g_error_free (error);
+                                }
                         }
                 }
         }
@@ -422,7 +429,7 @@ gsm_manager_quit (GsmManager *manager)
                 g_signal_connect (consolekit,
                                   "request-completed",
                                   G_CALLBACK (quit_request_completed),
-                                  GINT_TO_POINTER (MDM_LOGOUT_ACTION_REBOOT));
+                                  GINT_TO_POINTER (MDM_LOGOUT_ACTION_NONE));
                 gsm_consolekit_attempt_restart (consolekit);
                 break;
         case GSM_MANAGER_LOGOUT_REBOOT_MDM:
@@ -437,7 +444,7 @@ gsm_manager_quit (GsmManager *manager)
                 g_signal_connect (consolekit,
                                   "request-completed",
                                   G_CALLBACK (quit_request_completed),
-                                  GINT_TO_POINTER (MDM_LOGOUT_ACTION_SHUTDOWN));
+                                  GINT_TO_POINTER (MDM_LOGOUT_ACTION_NONE));
                 gsm_consolekit_attempt_stop (consolekit);
                 break;
         case GSM_MANAGER_LOGOUT_SHUTDOWN_MDM:
@@ -566,12 +573,37 @@ on_phase_timeout (GsmManager *manager)
 }
 
 static gboolean
+_autostart_delay_timeout (GsmApp *app)
+{
+        GError *error = NULL;
+        gboolean res;
+
+        if (!gsm_app_peek_is_disabled (app)
+            && !gsm_app_peek_is_conditionally_disabled (app)) {
+                res = gsm_app_start (app, &error);
+                if (!res) {
+                        if (error != NULL) {
+                                g_warning ("Could not launch application '%s': %s",
+                                           gsm_app_peek_app_id (app),
+                                           error->message);
+                                g_error_free (error);
+                        }
+                }
+        }
+
+        g_object_unref (app);
+
+        return FALSE;
+}
+
+static gboolean
 _start_app (const char *id,
             GsmApp     *app,
             GsmManager *manager)
 {
         GError  *error;
         gboolean res;
+        int      delay;
 
         if (gsm_app_peek_phase (app) != manager->priv->phase) {
                 goto out;
@@ -587,6 +619,15 @@ _start_app (const char *id,
         if (gsm_app_peek_is_disabled (app)
             || gsm_app_peek_is_conditionally_disabled (app)) {
                 g_debug ("GsmManager: Skipping disabled app: %s", id);
+                goto out;
+        }
+
+        delay = gsm_app_peek_autostart_delay (app);
+        if (delay > 0) {
+                g_timeout_add_seconds (delay, 
+                                       (GSourceFunc)_autostart_delay_timeout,
+                                       g_object_ref (app));
+                g_debug ("GsmManager: %s is scheduled to start in %d seconds", id, delay);
                 goto out;
         }
 
@@ -962,18 +1003,33 @@ manager_switch_user (GsmManager *manager)
 }
 
 static gboolean
-sleep_lock_is_enabled (GsmManager *manager)
+sleep_lock_is_enabled (GsmManager  *manager,
+                       const gchar *policy)
 {
-        GError   *error;
-        gboolean  enable_lock;
+        GError      *error;
+        gboolean     enable_lock;
+        gboolean     use_ss_setting;
+        const gchar *real_policy;
 
         error = NULL;
+        use_ss_setting = mateconf_client_get_bool (manager->priv->mateconf_client, 
+                                                KEY_SLEEP_LOCK_USE_SCREENSAVER, &error);
+        if (error) {
+                g_warning ("Error retrieving configuration key '%s': %s",
+                           KEY_SLEEP_LOCK_USE_SCREENSAVER, error->message);
+                g_error_free (error);
+
+                use_ss_setting = FALSE;
+        }
+
+        real_policy = (use_ss_setting ? KEY_SLEEP_LOCK : policy);
+
         enable_lock = mateconf_client_get_bool (manager->priv->mateconf_client,
-                                             KEY_SLEEP_LOCK, &error);
+                                             real_policy, &error);
 
         if (error) {
                 g_warning ("Error retrieving configuration key '%s': %s",
-                           KEY_SLEEP_LOCK, error->message);
+                           real_policy, error->message);
                 g_error_free (error);
 
                 /* If we fail to query mateconf key, just enable locking */
@@ -984,13 +1040,14 @@ sleep_lock_is_enabled (GsmManager *manager)
 }
 
 static void
-manager_perhaps_lock (GsmManager *manager)
+manager_perhaps_lock (GsmManager  *manager,
+                      const gchar *policy)
 {
         GError   *error;
         gboolean  ret;
 
         /* only lock if mate-screensaver is set to lock */
-        if (!sleep_lock_is_enabled (manager)) {
+        if (!sleep_lock_is_enabled (manager, policy)) {
                 return;
         }
 
@@ -1004,17 +1061,25 @@ manager_perhaps_lock (GsmManager *manager)
 }
 
 static void
+manager_ensure_up_client (GsmManager *manager)
+{
+        if (manager->priv->up_client == NULL)
+                manager->priv->up_client = up_client_new ();
+}
+
+static void
 manager_attempt_hibernate (GsmManager *manager)
 {
         gboolean  can_hibernate;
         GError   *error;
         gboolean  ret;
 
+        manager_ensure_up_client (manager);  
         can_hibernate = up_client_get_can_hibernate (manager->priv->up_client);
         if (can_hibernate) {
 
                 /* lock the screen before we suspend */
-                manager_perhaps_lock (manager);
+                manager_perhaps_lock (manager, GPM_CONF_LOCK_ON_HIBERNATE);
 
                 error = NULL;
                 ret = up_client_hibernate_sync (manager->priv->up_client, NULL, &error);
@@ -1033,11 +1098,12 @@ manager_attempt_suspend (GsmManager *manager)
         GError   *error;
         gboolean  ret;
 
+        manager_ensure_up_client (manager);  
         can_suspend = up_client_get_can_suspend (manager->priv->up_client);
         if (can_suspend) {
 
                 /* lock the screen before we suspend */
-                manager_perhaps_lock (manager);
+                manager_perhaps_lock (manager, GPM_CONF_LOCK_ON_SUSPEND);
 
                 error = NULL;
                 ret = up_client_suspend_sync (manager->priv->up_client, NULL, &error);
@@ -1176,6 +1242,69 @@ query_end_session_complete (GsmManager *manager)
 
 }
 
+static gboolean
+_client_request_save (GsmClient            *client,
+                      ClientEndSessionData *data)
+{
+        gboolean ret;
+        GError  *error;
+
+        error = NULL;
+        ret = gsm_client_request_save (client, data->flags, &error);
+        if (ret) {
+                g_debug ("GsmManager: adding client to query clients: %s", gsm_client_peek_id (client));
+                data->manager->priv->query_clients = g_slist_prepend (data->manager->priv->query_clients,
+                                                                      client);
+        } else if (error) {
+                g_debug ("GsmManager: unable to query client: %s", error->message);
+                g_error_free (error);
+        }
+
+        return FALSE;
+}
+
+static gboolean
+_client_request_save_helper (const char           *id,
+                             GsmClient            *client,
+                             ClientEndSessionData *data)
+{
+        return _client_request_save (client, data);
+}
+
+static void
+query_save_session_complete (GsmManager *manager)
+{
+        GError *error = NULL;
+
+        if (g_slist_length (manager->priv->next_query_clients) > 0) {
+                ClientEndSessionData data;
+
+                data.manager = manager;
+                data.flags = GSM_CLIENT_END_SESSION_FLAG_LAST;
+
+                g_slist_foreach (manager->priv->next_query_clients,
+                                 (GFunc)_client_request_save,
+                                 &data);
+
+                g_slist_free (manager->priv->next_query_clients);
+                manager->priv->next_query_clients = NULL;
+
+                return;
+        }
+
+        if (manager->priv->query_timeout_id > 0) {
+                g_source_remove (manager->priv->query_timeout_id);
+                manager->priv->query_timeout_id = 0;
+        }
+
+        gsm_session_save (manager->priv->clients, &error);
+
+        if (error) {
+                g_warning ("Error saving session: %s", error->message);
+                g_error_free (error);
+        }
+}
+
 static guint32
 generate_cookie (void)
 {
@@ -1246,6 +1375,21 @@ _on_query_end_session_timeout (GsmManager *manager)
         manager->priv->query_clients = NULL;
 
         query_end_session_complete (manager);
+
+        return FALSE;
+}
+
+static gboolean
+_on_query_save_session_timeout (GsmManager *manager)
+{
+        manager->priv->query_timeout_id = 0;
+
+        g_debug ("GsmManager: query to save session timed out");
+
+        g_slist_free (manager->priv->query_clients);
+        manager->priv->query_clients = NULL;
+
+        query_save_session_complete (manager);
 
         return FALSE;
 }
@@ -1351,11 +1495,12 @@ _debug_app_for_phase (const char *id,
                 return FALSE;
         }
 
-        g_debug ("GsmManager:\tID: %s\tapp-id:%s\tis-disabled:%d\tis-conditionally-disabled:%d",
+        g_debug ("GsmManager:\tID: %s\tapp-id:%s\tis-disabled:%d\tis-conditionally-disabled:%d\tis-delayed:%d",
                  gsm_app_peek_id (app),
                  gsm_app_peek_app_id (app),
                  gsm_app_peek_is_disabled (app),
-                 gsm_app_peek_is_conditionally_disabled (app));
+                 gsm_app_peek_is_conditionally_disabled (app),
+                 (gsm_app_peek_autostart_delay (app) > 0));
 
         return FALSE;
 }
@@ -1886,12 +2031,31 @@ on_client_end_session_response (GsmClient  *client,
                                 const char *reason,
                                 GsmManager *manager)
 {
-        /* just ignore if received outside of shutdown */
-        if (manager->priv->phase < GSM_MANAGER_PHASE_QUERY_END_SESSION) {
+        /* just ignore if we are not yet running */
+        if (manager->priv->phase < GSM_MANAGER_PHASE_RUNNING) {
                 return;
         }
 
         g_debug ("GsmManager: Response from end session request: is-ok=%d do-last=%d cancel=%d reason=%s", is_ok, do_last, cancel, reason ? reason :"");
+
+        if (manager->priv->phase == GSM_MANAGER_PHASE_RUNNING) {
+                /* Ignore responses when no requests were sent */
+                if (manager->priv->query_clients == NULL) {
+                        return;
+                }
+
+                manager->priv->query_clients = g_slist_remove (manager->priv->query_clients, client);
+
+                if (do_last) {
+                        manager->priv->next_query_clients = g_slist_prepend (manager->priv->next_query_clients,
+                                                                             client);
+                }
+
+                if (manager->priv->query_clients == NULL) {
+                        query_save_session_complete (manager);
+                }
+                return;
+        }
 
         if (cancel) {
                 cancel_end_session (manager);
@@ -1938,7 +2102,7 @@ on_client_end_session_response (GsmClient  *client,
                                           (gpointer)gsm_client_peek_id (client));
         }
 
-        if (manager->priv->phase == GSM_MANAGER_PHASE_QUERY_END_SESSION) {
+        if (manager->priv->phase == GSM_MANAGER_PHASE_QUERY_END_SESSION) { 
                 if (manager->priv->query_clients == NULL) {
                         query_end_session_complete (manager);
                 }
@@ -1991,6 +2155,15 @@ on_xsmp_client_logout_request (GsmXSMPClient *client,
 }
 
 static void
+on_xsmp_client_save_request (GsmXSMPClient *client,
+                             gboolean       show_dialog,
+                             GsmManager    *manager)
+{
+        g_debug ("GsmManager: save_request");
+        gsm_manager_save_session (manager, NULL);
+}
+
+static void
 on_store_client_added (GsmStore   *store,
                        const char *id,
                        GsmManager *manager)
@@ -2011,6 +2184,10 @@ on_store_client_added (GsmStore   *store,
                                   "logout-request",
                                   G_CALLBACK (on_xsmp_client_logout_request),
                                   manager);
+		g_signal_connect (client,
+				  "save-request",
+				  G_CALLBACK (on_xsmp_client_save_request),
+				  manager);
         }
 
         g_signal_connect (client,
@@ -2452,7 +2629,7 @@ gsm_manager_init (GsmManager *manager)
                           G_CALLBACK (on_presence_status_changed),
                           manager);
 
-        manager->priv->up_client = up_client_new ();
+        manager->priv->up_client = NULL;
 
         /* MateConf setup */
         mateconf_client_add_dir (manager->priv->mateconf_client,
@@ -2827,7 +3004,8 @@ logout_dialog_response (GsmLogoutDialog *logout_dialog,
 {
         g_debug ("GsmManager: Logout dialog response: %d", response_id);
 
-        gtk_widget_destroy (GTK_WIDGET (logout_dialog));
+        if (response_id != GTK_RESPONSE_HELP)
+                gtk_widget_destroy (GTK_WIDGET (logout_dialog));
 
         /* In case of dialog cancel, switch user, hibernate and
          * suspend, we just perform the respective action and return,
@@ -2836,6 +3014,10 @@ logout_dialog_response (GsmLogoutDialog *logout_dialog,
         case GTK_RESPONSE_CANCEL:
         case GTK_RESPONSE_NONE:
         case GTK_RESPONSE_DELETE_EVENT:
+                break;
+        case GTK_RESPONSE_HELP:
+                gsm_util_help_display (GTK_WINDOW (logout_dialog),
+                                       "gosgetstarted-73");
                 break;
         case GSM_LOGOUT_RESPONSE_SWITCH_USER:
                 request_switch_user (manager);
@@ -2947,6 +3129,48 @@ gsm_manager_set_phase (GsmManager      *manager,
 }
 
 gboolean
+gsm_manager_request_shutdown (GsmManager *manager,
+                              GError    **error)
+{
+        g_debug ("GsmManager: RequestShutdown called");
+
+        g_return_val_if_fail (GSM_IS_MANAGER (manager), FALSE);
+
+        if (manager->priv->phase != GSM_MANAGER_PHASE_RUNNING) {
+                g_set_error (error,
+                             GSM_MANAGER_ERROR,
+                             GSM_MANAGER_ERROR_NOT_IN_RUNNING,
+                             "RequestShutdown interface is only available during the Running phase");
+                return FALSE;
+        }
+
+        request_shutdown (manager);
+
+        return TRUE;
+}
+
+gboolean
+gsm_manager_request_reboot (GsmManager *manager,
+                            GError    **error)
+{
+        g_debug ("GsmManager: RequestReboot called");
+
+        g_return_val_if_fail (GSM_IS_MANAGER (manager), FALSE);
+
+        if (manager->priv->phase != GSM_MANAGER_PHASE_RUNNING) {
+                g_set_error (error,
+                             GSM_MANAGER_ERROR,
+                             GSM_MANAGER_ERROR_NOT_IN_RUNNING,
+                             "RequestReboot interface is only available during the Running phase");
+                return FALSE;
+        }
+
+        request_reboot (manager);
+
+        return TRUE;
+}
+
+gboolean
 gsm_manager_shutdown (GsmManager *manager,
                       GError    **error)
 {
@@ -2968,6 +3192,41 @@ gsm_manager_shutdown (GsmManager *manager,
 }
 
 gboolean
+gsm_manager_save_session (GsmManager *manager,
+                          GError     **error)
+{
+        ClientEndSessionData data;
+
+        g_debug ("GsmManager: SaveSession called");
+
+        g_return_val_if_fail (GSM_IS_MANAGER (manager), FALSE);
+
+        if (manager->priv->phase != GSM_MANAGER_PHASE_RUNNING) {
+                g_set_error (error,
+                             GSM_MANAGER_ERROR,
+                             GSM_MANAGER_ERROR_NOT_IN_RUNNING,
+                             "SaveSession interface is only available during the Running phase");
+                return FALSE;
+        }
+
+        data.manager = manager;
+        data.flags = 0;
+        gsm_store_foreach (manager->priv->clients,
+                           (GsmStoreFunc)_client_request_save_helper,
+                           &data);
+
+        if (manager->priv->query_clients) {
+                manager->priv->query_timeout_id = g_timeout_add_seconds (GSM_MANAGER_SAVE_SESSION_TIMEOUT,
+                                                                         (GSourceFunc)_on_query_save_session_timeout,
+                                                                         manager);
+                return TRUE;
+        } else {
+                g_debug ("GsmManager: Nothing to save");
+                return FALSE;
+        }
+}
+
+gboolean
 gsm_manager_can_shutdown (GsmManager *manager,
                           gboolean   *shutdown_available,
                           GError    **error)
@@ -2976,6 +3235,7 @@ gsm_manager_can_shutdown (GsmManager *manager,
         gboolean can_suspend;
         gboolean can_hibernate;
 
+        manager_ensure_up_client (manager);  
         g_object_get (manager->priv->up_client,
                       "can-suspend", &can_suspend,
                       "can-hibernate", &can_hibernate,
@@ -3439,6 +3699,7 @@ gsm_manager_add_autostart_app (GsmManager *manager,
                                const char *provides)
 {
         GsmApp *app;
+        gboolean is_une_session = (g_strcmp0 (g_getenv ("MDMSESSION"), "une\0") == 0);
 
         g_return_val_if_fail (GSM_IS_MANAGER (manager), FALSE);
         g_return_val_if_fail (path != NULL, FALSE);
@@ -3450,7 +3711,10 @@ gsm_manager_add_autostart_app (GsmManager *manager,
                 dup = (GsmApp *)gsm_store_find (manager->priv->apps,
                                                 (GsmStoreFunc)_find_app_provides,
                                                 (char *)provides);
-                if (dup != NULL) {
+                // even if we don't launch a saved component like marco or compiz, it
+                // will consider it as already fullfilling the need
+                if ((dup != NULL) &&
+                    (!is_une_session || (is_une_session && (strcmp (provides, "windowmanager"))))) {
                         g_debug ("GsmManager: service '%s' is already provided", provides);
                         return FALSE;
                 }

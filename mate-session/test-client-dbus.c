@@ -122,7 +122,7 @@ register_client (void)
         const char *app_id;
 
         startup_id = g_getenv ("DESKTOP_AUTOSTART_ID");
-        app_id = "gedit";
+        app_id = "pluma";
 
         error = NULL;
         res = dbus_g_proxy_call (sm_proxy,

@@ -31,6 +31,8 @@
 #include "gsm-inhibitor.h"
 #include "gsm-inhibitor-glue.h"
 
+#include "gsm-util.h"
+
 static guint32 inhibitor_serial = 1;
 
 #define IS_STRING_EMPTY(x) ((x)==NULL||(x)[0]=='\0')

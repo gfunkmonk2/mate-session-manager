@@ -35,6 +35,12 @@
 #include "gsm-util.h"
 #include "gsp-app.h"
 #include "gsp-app-manager.h"
+#include <dbus/dbus-glib.h>
+#include <dbus/dbus-glib-lowlevel.h>
+
+#define GSM_SERVICE_DBUS   "org.mate.SessionManager"
+#define GSM_PATH_DBUS      "/org/mate/SessionManager"
+#define GSM_INTERFACE_DBUS "org.mate.SessionManager"
 
 #define GSM_PROPERTIES_DIALOG_GET_PRIVATE(o) (G_TYPE_INSTANCE_GET_PRIVATE ((o), GSM_TYPE_PROPERTIES_DIALOG, GsmPropertiesDialogPrivate))
 
@@ -50,6 +56,7 @@
 #define CAPPLET_DELETE_WIDGET_NAME        "session_properties_delete_button"
 #define CAPPLET_EDIT_WIDGET_NAME          "session_properties_edit_button"
 #define CAPPLET_SAVE_WIDGET_NAME          "session_properties_save_button"
+#define CAPPLET_SESSION_SAVED_WIDGET_NAME "session_properties_session_saved_label"
 #define CAPPLET_REMEMBER_WIDGET_NAME      "session_properties_remember_toggle"
 
 #define STARTUP_APP_ICON     "system-run"
@@ -119,11 +126,13 @@ _fill_iter_from_app (GtkListStore *list_store,
                      GspApp       *app)
 {
         gboolean    hidden;
+        gboolean    display;
         gboolean    enabled;
         GIcon      *icon;
         const char *description;
 
         hidden      = gsp_app_get_hidden (app);
+        display     = gsp_app_get_display (app);
         enabled     = gsp_app_get_enabled (app);
         icon        = gsp_app_get_icon (app);
         description = gsp_app_get_description (app);
@@ -154,7 +163,7 @@ _fill_iter_from_app (GtkListStore *list_store,
         }
 
         gtk_list_store_set (list_store, iter,
-                            STORE_COL_VISIBLE, !hidden,
+                            STORE_COL_VISIBLE, (display && !hidden),
                             STORE_COL_ENABLED, enabled,
                             STORE_COL_GICON, icon,
                             STORE_COL_DESCRIPTION, description,
@@ -493,10 +502,64 @@ on_autosave_value_toggled (GtkToggleButton     *button,
 }
 
 static void
+session_saved_message (GsmPropertiesDialog *dialog,
+                       const char *msg,
+                       gboolean is_error)
+{
+        GtkLabel *label;
+        gchar *markup;
+        label = GTK_LABEL (gtk_builder_get_object (dialog->priv->xml, CAPPLET_SESSION_SAVED_WIDGET_NAME));
+        if (is_error)
+                markup = g_markup_printf_escaped ("<span foreground=\"red\">%s</span>", msg);
+        else
+                markup = g_markup_escape_text (msg, -1);
+        gtk_label_set_markup (label, markup);
+        g_free (markup);
+}
+
+static void
+session_saved_cb (DBusGProxy *proxy,
+                  DBusGProxyCall *call_id,
+                  void *user_data)
+{
+        gboolean res;
+        GsmPropertiesDialog *dialog = user_data;
+
+        res = dbus_g_proxy_end_call (proxy, call_id, NULL, G_TYPE_INVALID);
+        if (res)
+                session_saved_message (dialog, _("Your session has been saved."), FALSE);
+        else
+                session_saved_message (dialog, _("Failed to save session"), TRUE);
+
+        g_object_unref (proxy);
+}
+
+static void
 on_save_session_clicked (GtkWidget           *widget,
                          GsmPropertiesDialog *dialog)
 {
-        g_debug ("Session saving is not implemented yet!");
+        DBusGConnection *conn;
+        DBusGProxy *proxy;
+        DBusGProxyCall *call;
+
+        conn = dbus_g_bus_get (DBUS_BUS_SESSION, NULL);
+        if (conn == NULL) {
+                session_saved_message (dialog, _("Could not connect to the session bus"), TRUE);
+                return;
+        }
+
+        proxy = dbus_g_proxy_new_for_name (conn, GSM_SERVICE_DBUS, GSM_PATH_DBUS, GSM_INTERFACE_DBUS);
+        if (proxy == NULL) {
+                session_saved_message (dialog, _("Could not connect to the session manager"), TRUE);
+                return;
+        }
+
+        call = dbus_g_proxy_begin_call (proxy, "SaveSession", session_saved_cb, dialog, NULL, G_TYPE_INVALID);
+        if (call == NULL) {
+                session_saved_message (dialog, _("Failed to save session"), TRUE);
+                g_object_unref (proxy);
+                return;
+        }
 }
 
 static void
@@ -784,6 +847,7 @@ gsm_properties_dialog_init (GsmPropertiesDialog *dialog)
                                                      "main-notebook"));
         gtk_container_add (GTK_CONTAINER (content_area), widget);
 
+        gtk_window_set_default_size (GTK_WINDOW (dialog), 600, 450);
         gtk_window_set_resizable (GTK_WINDOW (dialog), TRUE);
         gtk_container_set_border_width (GTK_CONTAINER (dialog), 6);
         gtk_box_set_spacing (GTK_BOX (content_area), 2);

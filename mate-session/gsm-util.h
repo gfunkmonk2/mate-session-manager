@@ -21,6 +21,7 @@
 #define __GSM_UTIL_H__
 
 #include <glib.h>
+#include <gtk/gtk.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -30,6 +31,8 @@ char *      gsm_util_find_desktop_file_for_app_name (const char  *app_name,
                                                      char       **dirs);
 
 gchar      *gsm_util_get_empty_tmp_session_dir      (void);
+
+void        gsm_util_set_saved_session_dirname      (const char * dirname);
 
 const char *gsm_util_get_saved_session_dir          (void);
 
@@ -48,6 +51,9 @@ char *      gsm_util_generate_startup_id            (void);
 
 void        gsm_util_setenv                         (const char *variable,
                                                      const char *value);
+
+void      gsm_util_help_display         (GtkWindow  *parent,
+                                         const char * link_id);
 
 #ifdef __cplusplus
 }

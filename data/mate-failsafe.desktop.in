@@ -1,0 +1,8 @@
+[Desktop Entry]
+_Name=MATE (Safe Mode)
+_Comment=This session logs you into MATE without user applications
+Exec=mate-session -f
+TryExec=mate-session
+X-MDM-FailSafe=true
+Icon=
+Type=Application

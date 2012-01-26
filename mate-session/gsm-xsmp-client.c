@@ -69,6 +69,7 @@ enum {
 enum {
         REGISTER_REQUEST,
         LOGOUT_REQUEST,
+	SAVE_REQUEST,
         LAST_SIGNAL
 };
 
@@ -502,6 +503,30 @@ xsmp_cancel_end_session (GsmClient *client,
         return TRUE;
 }
 
+static gboolean
+xsmp_request_save (GsmClient *client,
+                   guint      flags,
+                   GError   **error)
+{
+        GsmXSMPClient *xsmp = (GsmXSMPClient *) client;
+
+        g_debug ("GsmXSMPClient: xsmp_request_save ('%s')", xsmp->priv->description);
+
+        if (xsmp->priv->conn == NULL) {
+                g_set_error (error,
+                             GSM_CLIENT_ERROR,
+                             GSM_CLIENT_ERROR_NOT_REGISTERED,
+                             "Client is not registered");
+                return FALSE;
+        }
+
+        if (flags & GSM_CLIENT_END_SESSION_FLAG_LAST)
+                xsmp_save_yourself_phase2 (client);
+        else
+                do_save_yourself (xsmp, SmSaveLocal, FALSE);
+
+        return TRUE;
+}
 static char *
 get_desktop_file_path (GsmXSMPClient *client)
 {
@@ -700,6 +725,14 @@ xsmp_stop (GsmClient *client,
                 return FALSE;
         }
 
+        if (xsmp->priv->conn == NULL) {
+                g_set_error (error,
+                             GSM_CLIENT_ERROR,
+                             GSM_CLIENT_ERROR_NOT_REGISTERED,
+                             "Client is not registered");
+                return FALSE;
+        }
+
         SmsDie (xsmp->priv->conn);
 
         return TRUE;
@@ -778,10 +811,12 @@ static char *
 xsmp_get_app_name (GsmClient *client)
 {
         SmProp *prop;
-        char   *name;
+        char   *name = NULL;
 
         prop = find_property (GSM_XSMP_CLIENT (client), SmProgram, NULL);
-        name = prop_to_command (prop);
+        if (prop) {
+                name = prop_to_command (prop);
+        }
 
         return name;
 }
@@ -976,6 +1011,7 @@ gsm_xsmp_client_class_init (GsmXSMPClientClass *klass)
         object_class->get_property         = gsm_xsmp_client_get_property;
         object_class->set_property         = gsm_xsmp_client_set_property;
 
+        client_class->impl_request_save           = xsmp_request_save;
         client_class->impl_save                   = xsmp_save;
         client_class->impl_stop                   = xsmp_stop;
         client_class->impl_query_end_session      = xsmp_query_end_session;
@@ -1000,6 +1036,17 @@ gsm_xsmp_client_class_init (GsmXSMPClientClass *klass)
                               G_OBJECT_CLASS_TYPE (object_class),
                               G_SIGNAL_RUN_LAST,
                               G_STRUCT_OFFSET (GsmXSMPClientClass, logout_request),
+                              NULL,
+                              NULL,
+                              g_cclosure_marshal_VOID__BOOLEAN,
+                              G_TYPE_NONE,
+                              1, G_TYPE_BOOLEAN);
+
+	signals[SAVE_REQUEST] =
+		g_signal_new ("save-request",
+                              G_OBJECT_CLASS_TYPE (object_class),
+                              G_SIGNAL_RUN_LAST,
+                              G_STRUCT_OFFSET (GsmXSMPClientClass, save_request),
                               NULL,
                               NULL,
                               g_cclosure_marshal_VOID__BOOLEAN,
